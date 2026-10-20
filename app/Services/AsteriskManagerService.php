@@ -181,4 +181,13 @@ class AsteriskManagerService
             fclose($socket);
         }
     }
+
+    public function reloadPjsip(): array
+    {
+        // AMI tarmoq porti (5038) orqali Asterisk-ga "pjsip reload" buyrug'ini yuborish
+        return $this->sendAction([
+            'Action'  => 'Command',
+            'Command' => 'pjsip reload'
+        ]);
+    }
 }
