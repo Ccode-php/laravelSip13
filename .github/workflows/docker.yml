@@ -29,4 +29,4 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/ccode-php/LaravelSip:v1.0.${{ github.run_number }}
+            ghcr.io/ccode-php/laravelsip13:v1.0.${{ github.run_number }}
