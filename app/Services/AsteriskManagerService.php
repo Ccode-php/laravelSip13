@@ -184,10 +184,45 @@ class AsteriskManagerService
 
     public function reloadPjsip(): array
     {
-        // AMI tarmoq porti (5038) orqali Asterisk-ga "pjsip reload" buyrug'ini yuborish
-        return $this->sendAction([
-            'Action'  => 'Command',
-            'Command' => 'pjsip reload'
-        ]);
+        // To'g'ridan-to'g'ri .env (Kubernetes YAML) o'zgaruvchilarini o'qiymiz
+        $host     = env('ASTERISK_AMI_HOST');
+        $port     = (int) env('ASTERISK_AMI_PORT');
+        $username = env('ASTERISK_AMI_USERNAME', );
+        $secret   = env('ASTERISK_AMI_SECRET');
+
+        $errno = 0;
+        $errstr = '';
+
+        // K3s manifestida yozilgan tarmoq ma'lumotlari orqali ulanish
+        $socket = @stream_socket_client("tcp://{$host}:{$port}", $errno, $errstr, 5);
+
+        if (!$socket) {
+            throw new \RuntimeException("AMI ulanish xatosi: {$errstr} ({$errno})");
+        }
+
+        $this->socket = $socket;
+        stream_set_timeout($socket, 5);
+
+        try {
+            if (fgets($socket, 4096) === false) {
+                throw new \RuntimeException('AMI bannerini olib bo‘lmadi.');
+            }
+
+            // AMI tizimiga kirish
+            $message = "Action: Login\r\nUsername: {$username}\r\nSecret: {$secret}\r\nEvents: off\r\n\r\n";
+            fwrite($socket, $message);
+            $this->readPacket(); 
+
+            // PJSIP-ni tarmoq orqali yangilash buyrug'ini yuborish
+            return $this->sendAction([
+                'Action'  => 'Command',
+                'Command' => 'pjsip reload'
+            ]);
+            
+        } finally {
+            @fwrite($socket, "Action: Logoff\r\n\r\n");
+            fclose($socket);
+            $this->socket = null;
+        }
     }
 }
