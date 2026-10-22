@@ -58,4 +58,25 @@ class SubscriberGroup extends Model
             'campaign_groups'
         );
     }
+
+    public static function withDescendantIds(array $ids): array
+    {
+        $byParent = static::query()->get(['id', 'parent_id'])->groupBy('parent_id');
+
+        $result = array_map('intval', $ids);
+        $queue = $result;
+
+        while ($queue) {
+            $current = array_pop($queue);
+
+            foreach ($byParent->get($current, []) as $child) {
+                if (!in_array($child->id, $result, true)) {
+                    $result[] = $child->id;
+                    $queue[] = $child->id;
+                }
+            }
+        }
+
+        return $result;
+    }
 }

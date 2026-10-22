@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Campaign;
+use App\Models\CampaignRecipient;
 use App\Models\Subscriber;
 use App\Models\SubscriberGroup;
 use Illuminate\Http\Request;
@@ -39,41 +40,7 @@ class CampaignController extends Controller
      */
     private function expandGroupIds(array $selectedIds): array
     {
-        $allGroups = SubscriberGroup::query()
-            ->get(['id', 'parent_id']);
-
-        $knownIds = [];
-
-        foreach ($selectedIds as $id) {
-            $knownIds[(int) $id] = true;
-        }
-
-        do {
-            $foundNew = false;
-
-            foreach ($allGroups as $group) {
-                $id = (int) $group->id;
-
-                if (isset($knownIds[$id])) {
-                    continue;
-                }
-
-                $parentId = $group->parent_id;
-
-                if (
-                    $parentId !== null &&
-                    isset($knownIds[(int) $parentId])
-                ) {
-                    $knownIds[$id] = true;
-                    $foundNew = true;
-                }
-            }
-        } while ($foundNew);
-
-        return array_map(
-            'intval',
-            array_keys($knownIds)
-        );
+        return SubscriberGroup::withDescendantIds($selectedIds);
     }
 
     /**
@@ -278,26 +245,32 @@ class CampaignController extends Controller
                  * target_type = all bo‘lsa,
                  * kategoriya yoki abonent filtri yo‘q.
                  */
-                $subscribers = $subscriberQuery
-                    ->orderBy('id')
-                    ->get();
-
                 $subscribers = $subscriberQuery->orderBy('id')->get();
 
+                $now = now();
+                $rows = [];
+
                 foreach ($subscribers as $subscriber) {
-                    // Abonentning barcha faol telefon raqamlarini aylanamiz
-                    foreach ($subscriber->phones as $index => $phone) {
-                        $campaign->recipients()->create([
-                            'subscriber_id'       => $subscriber->id,
+                    foreach ($subscriber->phones as $phone) {
+                        $rows[] = [
+                            'campaign_id' => $campaign->id,
+                            'subscriber_id' => $subscriber->id,
                             'subscriber_phone_id' => $phone->id,
-                            'name'                => $subscriber->name,
-                            'phone'               => $phone->phone,
-                            'attempt'             => 1,
-                            // Har bir raqam uchun 2 tadan urinish qoidasi
-                            'max_attempts'        => 2,
-                            'status'              => 'pending',
-                        ]);
+                            'name' => $subscriber->name,
+                            'phone' => $phone->phone,
+                            'attempt' => 1,
+                            'max_attempts' => $validated['max_attempts'],   // 2 qat’iy emas
+                            'status' => 'pending',
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
                     }
+                }
+
+                abort_if(empty($rows), 422, 'Tanlangan abonentlar orasida faol telefon raqami yo‘q.');
+
+                foreach (array_chunk($rows, 500) as $chunk) {
+                    CampaignRecipient::insert($chunk);
                 }
 
                 return $campaign;
@@ -408,88 +381,13 @@ class CampaignController extends Controller
         ]);
     }
 
-    public function start(\App\Models\Campaign $campaign)
+    public function stop(Campaign $campaign)
     {
-        $campaign = \Illuminate\Support\Facades\DB::transaction(
-            function () use ($campaign) {
-                $campaign = \App\Models\Campaign::whereKey($campaign->id)
-                    ->lockForUpdate()
-                    ->firstOrFail();
+        abort_unless($campaign->status === 'running', 422, 'Kampaniya ishlamayapti.');
 
-                if (!in_array($campaign->status, ['draft', 'queued'])) {
-                    abort(422, 'Kampaniyani bu holatda boshlash mumkin emas.');
-                }
+        // Davom etayotgan suhbatlar o‘zi tugaydi, yangi qo‘ng‘iroq chiqmaydi.
+        $campaign->update(['status' => 'stopped']);
 
-                if (!$campaign->sipTrunk || !$campaign->sipTrunk->enabled) {
-                    abort(422, 'Faol SIP trunk tanlanmagan.');
-                }
-
-                if (!$campaign->audioFile) {
-                    abort(422, 'Ovozli fayl tanlanmagan.');
-                }
-
-                if (!$campaign->recipients()->where('status', 'pending')->exists()) {
-                    abort(422, 'Navbatda abonentlar yo‘q.');
-                }
-
-                $campaign->status = 'queued';
-                $campaign->save();
-
-                return $campaign;
-            }
-        );
-
-
-        $result = app(\App\Services\CampaignDispatcher::class)
-            ->dispatch($campaign->id);
-
-        $campaign->refresh();
-
-        return response()->json([
-            'message' => $result['message'],
-            'campaign_id' => $campaign->id,
-            'status' => $campaign->status,
-            'started' => $result['started'],
-        ]);
-    }
-
-    public function handleAsteriskWebhook(Request $request)
-    {
-        $recipient = \App\Models\CampaignRecipient::findOrFail($request->recipient_id);
-        $status = $request->status; // answered, busy, noanswer, failed
-
-        if ($status == 'noanswer') $status = 'no_answer';
-
-        if ($status == 'answered') {
-            $recipient->update([
-                'status' => 'answered',
-                'answered_at' => now(),
-                'finished_at' => now(),
-                'duration' => now()->diffInSeconds($recipient->started_at)
-            ]);
-        } else {
-            // Agar javob bermasa yoki band bo'lsa, xuddi shu raqamga urinishlar sonini tekshiramiz
-            $currentAttempt = $recipient->attempt;
-
-            if ($currentAttempt < $recipient->max_attempts) {
-                // Hali 2-urinish imkoniyati bor, joriy raqamni qaytadan 'pending' rejimiga qaytaramiz
-                $recipient->update([
-                    'status' => 'pending',
-                    'attempt' => $currentAttempt + 1,
-                    'finished_at' => now()
-                ]);
-            } else {
-                // 2 marta urinib ham javob bermadi, demak bu raqam to'liq yopildi (busy yoki no_answer)
-                $recipient->update([
-                    'status' => $status == 'busy' ? 'busy' : 'no_answer',
-                    'finished_at' => now()
-                ]);
-            }
-        }
-
-        // Bo'shagan liniyalarni zudlik bilan yangi navbatdagi abonentlar bilan to'ldirish uchun dispetcherni chaqiramiz
-        app(\App\Services\CampaignDispatcher::class)->dispatch($recipient->campaign_id);
-
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'status' => 'stopped']);
     }
 }

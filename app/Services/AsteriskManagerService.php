@@ -2,227 +2,287 @@
 
 namespace App\Services;
 
-use RuntimeException;
 use InvalidArgumentException;
+use RuntimeException;
 
+/**
+ * Asterisk AMI klienti.
+ *
+ * - Bitta doimiy ulanish (har buyruqqa yangi login qilinmaydi).
+ * - Javob kutayotganda kelgan hodisalar yo‘qolmaydi, onEvent() ga uzatiladi.
+ * - Bir xil nomli sarlavhalar (masalan, bir nechta Variable) qo‘llab-quvvatlanadi.
+ */
 class AsteriskManagerService
 {
-    private $socket;
+    /** @var resource|null */
+    private $socket = null;
 
-    private function readPacket(): array
+    /** @var callable|null */
+    private $eventHandler = null;
+
+    public function __destruct()
     {
-        $packet = [];
-
-        while (($line = fgets($this->socket, 4096)) !== false) {
-            $line = trim($line);
-
-            if ($line === '') {
-                if ($packet !== []) {
-                    return $packet;
-                }
-
-                continue;
-            }
-
-            $parts = explode(':', $line, 2);
-
-            if (count($parts) === 2) {
-                $packet[trim($parts[0])] = trim($parts[1]);
-            }
-        }
-
-        $meta = stream_get_meta_data($this->socket);
-
-        if ($meta['timed_out']) {
-            throw new RuntimeException('AMI javob berish vaqti tugadi.');
-        }
-
-        throw new RuntimeException('AMI ulanishi uzildi.');
+        $this->close();
     }
 
-    private function sendAction(array $headers): array
+    public function onEvent(callable $handler): void
     {
-        $message = '';
-
-        foreach ($headers as $key => $value) {
-            $message .= $key . ': ' . $value . "\r\n";
-        }
-
-        $message .= "\r\n";
-
-        if (fwrite($this->socket, $message) === false) {
-            throw new RuntimeException('AMI buyrug‘ini yuborib bo‘lmadi.');
-        }
-
-        // AMI hodisalari javobdan oldin kelishi mumkin.
-        // Shu sababli Response kelguncha paketlarni o‘qiymiz.
-        do {
-            $response = $this->readPacket();
-        } while (!isset($response['Response']));
-
-        if (strtolower($response['Response']) !== 'success') {
-            throw new RuntimeException(
-                $response['Message'] ?? 'AMI buyrug‘i bajarilmadi.'
-            );
-        }
-
-        return $response;
+        $this->eventHandler = $handler;
     }
 
-    public function ping(): array
+    public function isConnected(): bool
     {
-        $host = config('services.asterisk.ami_host');
-        $port = config('services.asterisk.ami_port');
-        $username = config('services.asterisk.ami_username');
-        $secret = config('services.asterisk.ami_secret');
+        return is_resource($this->socket);
+    }
 
-        $errno = 0;
-        $errstr = '';
+    public function setReadTimeout(int $seconds): void
+    {
+        if ($this->isConnected()) {
+            stream_set_timeout($this->socket, $seconds);
+        }
+    }
 
-        $this->socket = @stream_socket_client(
-            "tcp://{$host}:{$port}",
+    public function connect(bool $withEvents = false): void
+    {
+        if ($this->isConnected()) {
+            return;
+        }
+
+        $cfg = config('asterisk.ami');
+
+        $socket = @stream_socket_client(
+            "tcp://{$cfg['host']}:{$cfg['port']}",
             $errno,
             $errstr,
-            5,
-            STREAM_CLIENT_CONNECT
+            $cfg['timeout']
         );
-
-        if (!$this->socket) {
-            throw new RuntimeException(
-                "AMI ulanish xatosi: {$errstr} ({$errno})"
-            );
-        }
-
-        stream_set_timeout($this->socket, 5);
-
-        try {
-            // Asterisk bannerini o‘qiymiz.
-            $banner = fgets($this->socket, 4096);
-
-            if ($banner === false) {
-                throw new RuntimeException('AMI bannerini olish imkonsiz.');
-            }
-
-            $this->sendAction([
-                'Action' => 'Login',
-                'Username' => $username,
-                'Secret' => $secret,
-                'Events' => 'off',
-            ]);
-
-            return $this->sendAction([
-                'Action' => 'Ping',
-            ]);
-        } finally {
-            if (is_resource($this->socket)) {
-                @fwrite($this->socket, "Action: Logoff\r\n\r\n");
-                fclose($this->socket);
-            }
-        }
-    }
-
-
-
-
-    public function originate(
-        string $phone,
-        int $recipientId,
-        string $trunkName,
-        string $audioPath
-    ): array {
-        $phone = preg_replace('/[\s()\-]/', '', $phone);
-
-        if (!is_string($phone) || !preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
-            throw new InvalidArgumentException('Telefon raqami noto‘g‘ri.');
-        }
-
-        $host = config('services.asterisk.ami_host', '127.0.0.1');
-        $port = config('services.asterisk.ami_port', 5038);
-        $username = config('services.asterisk.ami_username', 'laravel');
-        $secret = config('services.asterisk.ami_secret', '123456');
-
-        $socket = @stream_socket_client("tcp://{$host}:{$port}", $errno, $errstr, 5);
 
         if (!$socket) {
             throw new RuntimeException("AMI ulanish xatosi: {$errstr} ({$errno})");
         }
 
         $this->socket = $socket;
-        stream_set_timeout($socket, 5);
+        $this->setReadTimeout((int) $cfg['timeout']);
+
+        if (fgets($this->socket, 4096) === false) {
+            $this->close();
+            throw new RuntimeException('AMI bannerini olib bo‘lmadi.');
+        }
 
         try {
-            if (fgets($socket, 4096) === false) {
-                throw new RuntimeException('AMI bannerini olib bo‘lmadi.');
-            }
-
-            // Login
-            $message = "Action: Login\r\nUsername: {$username}\r\nSecret: {$secret}\r\nEvents: off\r\n\r\n";
-            fwrite($socket, $message);
-            $this->readPacket();
-
-            // Trunk nomini Asterisk mos formatga o'tkazish
-            $sanitizedTrunk = strtolower(preg_replace('/[^a-zA-Z0-9_-]/', '_', $trunkName));
-
-            $headers = [
-                'Action'   => 'Originate',
-                'Channel'  => "PJSIP/{$phone}@{$sanitizedTrunk}",
-                'Context'  => 'campaign-playback',
-                'Exten'    => 's',
-                'Priority' => '1',
-                'Timeout'  => '30000',
-                'Async'    => 'true',
-                'CallerID' => 'AutoDialer <1000>',
-                'Variable' => "RECIPIENT_ID={$recipientId},AUDIO_FILE={$audioPath}",
-            ];
-
-            return $this->sendAction($headers);
-        } finally {
-            @fwrite($socket, "Action: Logoff\r\n\r\n");
-            fclose($socket);
+            $this->action([
+                'Action' => 'Login',
+                'Username' => $cfg['username'],
+                'Secret' => $cfg['secret'],
+                // Faqat kerakli hodisa sinflari: OriginateResponse (call) va UserEvent (user)
+                'Events' => $withEvents ? 'call,user' : 'off',
+            ]);
+        } catch (\Throwable $e) {
+            $this->close();
+            throw $e;
         }
     }
 
-    public function reloadPjsip(): array
+    public function close(): void
     {
-        // To'g'ridan-to'g'ri .env (Kubernetes YAML) o'zgaruvchilarini o'qiymiz
-        $host     = env('ASTERISK_AMI_HOST');
-        $port     = (int) env('ASTERISK_AMI_PORT');
-        $username = env('ASTERISK_AMI_USERNAME', );
-        $secret   = env('ASTERISK_AMI_SECRET');
-
-        $errno = 0;
-        $errstr = '';
-
-        // K3s manifestida yozilgan tarmoq ma'lumotlari orqali ulanish
-        $socket = @stream_socket_client("tcp://{$host}:{$port}", $errno, $errstr, 5);
-
-        if (!$socket) {
-            throw new \RuntimeException("AMI ulanish xatosi: {$errstr} ({$errno})");
+        if (is_resource($this->socket)) {
+            @fwrite($this->socket, "Action: Logoff\r\n\r\n");
+            @fclose($this->socket);
         }
 
-        $this->socket = $socket;
-        stream_set_timeout($socket, 5);
+        $this->socket = null;
+    }
 
-        try {
-            if (fgets($socket, 4096) === false) {
-                throw new \RuntimeException('AMI bannerini olib bo‘lmadi.');
+    /**
+     * Buyruq yuboradi va unga tegishli javobni qaytaradi.
+     * Kutish paytida kelgan hodisalar onEvent() handleriga beriladi.
+     */
+    public function action(array $headers): array
+    {
+        if (!$this->isConnected()) {
+            throw new RuntimeException('AMI ga ulanilmagan.');
+        }
+
+        $actionId = (string) ($headers['ActionID'] ?? bin2hex(random_bytes(6)));
+        $headers['ActionID'] = $actionId;
+
+        $message = '';
+
+        foreach ($headers as $key => $values) {
+            foreach ((array) $values as $value) {
+                $message .= $key . ': ' . str_replace(["\r", "\n"], ' ', (string) $value) . "\r\n";
+            }
+        }
+
+        $message .= "\r\n";
+
+        if (@fwrite($this->socket, $message) === false) {
+            $this->close();
+            throw new RuntimeException('AMI buyrug‘ini yuborib bo‘lmadi.');
+        }
+
+        $deadline = microtime(true) + 10;
+
+        while (true) {
+            $packet = $this->readPacket();
+
+            if ($packet === null) {
+                if (microtime(true) > $deadline) {
+                    $this->close();
+                    throw new RuntimeException('AMI javob berish vaqti tugadi.');
+                }
+
+                continue;
             }
 
-            // AMI tizimiga kirish
-            $message = "Action: Login\r\nUsername: {$username}\r\nSecret: {$secret}\r\nEvents: off\r\n\r\n";
-            fwrite($socket, $message);
-            $this->readPacket(); 
+            if (isset($packet['Event'])) {
+                $this->dispatchEvent($packet);
+                continue;
+            }
 
-            // PJSIP-ni tarmoq orqali yangilash buyrug'ini yuborish
-            return $this->sendAction([
-                'Action'  => 'Command',
-                'Command' => 'pjsip reload'
-            ]);
-            
-        } finally {
-            @fwrite($socket, "Action: Logoff\r\n\r\n");
-            fclose($socket);
-            $this->socket = null;
+            if (($packet['ActionID'] ?? null) !== $actionId || !isset($packet['Response'])) {
+                continue;
+            }
+
+            if (!in_array(strtolower($packet['Response']), ['success', 'follows'], true)) {
+                throw new RuntimeException($packet['Message'] ?? 'AMI buyrug‘i bajarilmadi.');
+            }
+
+            return $packet;
+        }
+    }
+
+    /**
+     * Listener uchun: kamida bitta paketni (timeout gacha) o‘qiydi
+     * va hodisa bo‘lsa handlerga beradi.
+     */
+    public function poll(): void
+    {
+        if (!$this->isConnected()) {
+            throw new RuntimeException('AMI ga ulanilmagan.');
+        }
+
+        $packet = $this->readPacket();
+
+        if ($packet !== null && isset($packet['Event'])) {
+            $this->dispatchEvent($packet);
+        }
+    }
+
+    public function ping(): array
+    {
+        $this->connect();
+
+        return $this->action(['Action' => 'Ping']);
+    }
+
+    /**
+     * Qo‘ng‘iroqni boshlaydi. Natija OriginateResponse hodisasi orqali keladi.
+     * ActionID formati: rcpt-{recipientId}-{attempt}
+     */
+    public function originate(
+        string $phone,
+        string $endpoint,
+        string $audio,
+        int $recipientId,
+        int $attempt,
+        ?string $callerId = null
+    ): string {
+        $phone = preg_replace('/[\s()\-]/', '', $phone);
+
+        if (!is_string($phone) || !preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
+            throw new InvalidArgumentException('Telefon raqami noto‘g‘ri.');
+        }
+
+        $callerId = preg_replace('/[^0-9+]/', '', (string) $callerId);
+
+        if ($callerId === '') {
+            $callerId = (string) config('asterisk.dialer.default_caller_id');
+        }
+
+        $actionId = "rcpt-{$recipientId}-{$attempt}";
+
+        $this->action([
+            'Action' => 'Originate',
+            'ActionID' => $actionId,
+            'Channel' => "PJSIP/{$phone}@{$endpoint}",
+            'Context' => config('asterisk.dialer.context'),
+            'Exten' => 's',
+            'Priority' => '1',
+            'Timeout' => (string) config('asterisk.dialer.originate_timeout_ms'),
+            'Async' => 'true',
+            'CallerID' => "\"{$callerId}\" <{$callerId}>",
+            // Har bir o‘zgaruvchi alohida sarlavha bo‘lishi kerak
+            'Variable' => [
+                "RECIPIENT_ID={$recipientId}",
+                "ATTEMPT={$attempt}",
+                "AUDIO_FILE={$audio}",
+            ],
+        ]);
+
+        return $actionId;
+    }
+
+    /**
+     * PJSIP modulini qayta yuklaydi (yangi/o‘zgargan trunklar uchun).
+     */
+    public function reloadPjsip(): void
+    {
+        $this->connect();
+
+        $this->action([
+            'Action' => 'Reload',
+            'Module' => 'res_pjsip.so',
+        ]);
+    }
+
+    private function dispatchEvent(array $packet): void
+    {
+        if ($this->eventHandler) {
+            ($this->eventHandler)($packet);
+        }
+    }
+
+    /**
+     * Bitta AMI paketini o‘qiydi. Timeout bo‘lsa null qaytaradi.
+     */
+    private function readPacket(): ?array
+    {
+        $packet = [];
+
+        while (true) {
+            $line = fgets($this->socket, 8192);
+
+            if ($line === false) {
+                $meta = stream_get_meta_data($this->socket);
+
+                if (!empty($meta['timed_out'])) {
+                    if ($packet === []) {
+                        return null;
+                    }
+
+                    continue;
+                }
+
+                $this->close();
+                throw new RuntimeException('AMI ulanishi uzildi.');
+            }
+
+            $line = rtrim($line, "\r\n");
+
+            if ($line === '') {
+                if ($packet === []) {
+                    continue;
+                }
+
+                return $packet;
+            }
+
+            $parts = explode(':', $line, 2);
+
+            if (count($parts) === 2) {
+                $packet[trim($parts[0])] = ltrim($parts[1]);
+            }
         }
     }
 }

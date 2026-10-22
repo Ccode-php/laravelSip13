@@ -22,6 +22,7 @@ class Campaign extends Model
         'status',
         'started_at',
         'finished_at',
+        'retry_delay_minutes',
     ];
 
     protected function casts(): array
@@ -31,6 +32,7 @@ class Campaign extends Model
             'max_attempts' => 'integer',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
+            'retry_delay_minutes' => 'integer'
         ];
     }
 

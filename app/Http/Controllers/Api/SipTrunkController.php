@@ -24,31 +24,33 @@ class SipTrunkController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'name' => ['sometimes', 'string', 'max:255'],
             'provider' => ['nullable', 'string', 'max:255'],
-            'host' => ['required', 'string', 'max:255'],
-            'port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'transport' => ['required', 'in:udp,tcp,tls'],
-            'auth_type' => ['required', 'in:username_password,ip'],
-            'username' => ['nullable', 'string', 'max:255'],
-            'password' => ['nullable', 'string', 'max:1000'],
+            'host' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z0-9.\-]+$/'],
+            'port' => ['sometimes', 'integer', 'min:1', 'max:65535'],
+            'transport' => ['sometimes', 'in:udp,tcp,tls'],
+            'auth_type' => ['sometimes', 'in:username_password,ip'],
+            'username' => ['required_if:auth_type,username_password', 'nullable', 'string', 'max:255'],
+            'password' => ['required_if:auth_type,username_password', 'nullable', 'string', 'max:1000'],
             'realm' => ['nullable', 'string', 'max:255'],
             'from_user' => ['nullable', 'string', 'max:255'],
             'from_domain' => ['nullable', 'string', 'max:255'],
             'outbound_proxy' => ['nullable', 'string', 'max:255'],
-            'codec' => ['nullable', 'string', 'max:255'],
-            'dtmf_mode' => ['nullable', 'string', 'max:50'],
+            'codec' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_,\s]+$/'],
+            'dtmf_mode' => ['nullable', 'in:rfc4733,inband,info,auto,auto_info'],
             'caller_id' => ['nullable', 'string', 'max:255'],
-            'max_concurrent_calls' => ['required', 'integer', 'min:1'],
+            'max_concurrent_calls' => ['sometimes', 'integer', 'min:1'],
             'enabled' => ['sometimes', 'boolean'],
         ]);
 
         $sipTrunk = SipTrunk::create($validated);
 
         // Asterisk faylini bazadagi yangi ma'lumotlar bilan sinxronizatsiya qilish
-        $this->syncAsteriskConfig();
+        
 
-        return new SipTrunkResource($sipTrunk);
+        $syncError = $this->syncAsteriskConfig();
+
+        return (new SipTrunkResource($sipTrunk))->additional(['sync_error' => $syncError]);
     }
 
     public function show(SipTrunk $sipTrunk)
@@ -61,18 +63,18 @@ class SipTrunkController extends Controller
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'provider' => ['nullable', 'string', 'max:255'],
-            'host' => ['sometimes', 'string', 'max:255'],
+            'host' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z0-9.\-]+$/'],
             'port' => ['sometimes', 'integer', 'min:1', 'max:65535'],
             'transport' => ['sometimes', 'in:udp,tcp,tls'],
             'auth_type' => ['sometimes', 'in:username_password,ip'],
-            'username' => ['nullable', 'string', 'max:255'],
-            'password' => ['nullable', 'string', 'max:1000'],
+            'username' => ['required_if:auth_type,username_password', 'nullable', 'string', 'max:255'],
+            'password' => ['required_if:auth_type,username_password', 'nullable', 'string', 'max:1000'],
             'realm' => ['nullable', 'string', 'max:255'],
             'from_user' => ['nullable', 'string', 'max:255'],
             'from_domain' => ['nullable', 'string', 'max:255'],
             'outbound_proxy' => ['nullable', 'string', 'max:255'],
-            'codec' => ['nullable', 'string', 'max:255'],
-            'dtmf_mode' => ['nullable', 'string', 'max:50'],
+            'codec' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_,\s]+$/'],
+            'dtmf_mode' => ['nullable', 'in:rfc4733,inband,info,auto,auto_info'],
             'caller_id' => ['nullable', 'string', 'max:255'],
             'max_concurrent_calls' => ['sometimes', 'integer', 'min:1'],
             'enabled' => ['sometimes', 'boolean'],
@@ -86,13 +88,20 @@ class SipTrunkController extends Controller
         $sipTrunk->update($validated);
 
         // O'zgarishlarni Asterisk fayliga yozish
-        $this->syncAsteriskConfig();
+        $syncError = $this->syncAsteriskConfig();
 
-        return new SipTrunkResource($sipTrunk->fresh());
+        return (new SipTrunkResource($sipTrunk))->additional(['sync_error' => $syncError]);
     }
 
     public function destroy(SipTrunk $sipTrunk)
     {
+        if (\App\Models\Campaign::where('sip_trunk_id', $sipTrunk->id)->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Bu trunk kampaniyalarda ishlatilgan, o‘chirib bo‘lmaydi. Uni o‘chirib qo‘yish (enabled=false) mumkin.',
+            ], 422);
+        }
+        
         $sipTrunk->delete();
 
         // O'chirilgan trunk Asterisk-dan ham yo'qolishi uchun faylni qayta yozamiz
@@ -108,31 +117,16 @@ class SipTrunkController extends Controller
      * Ma'lumotlar bazasidagi barcha faol trunklarni yig'ib,
      * pjsip_trunk.conf faylini qayta yozuvchi xavfsiz metod.
      */
-    private function syncAsteriskConfig(): void
+    private function syncAsteriskConfig(): ?string
     {
         try {
-            $activeTrunks = SipTrunk::where('enabled', true)->get();
+            $this->configService->syncAll();
 
-            $configContent = "; ==========================================" . PHP_EOL .
-                "; AUTOMATICALLY GENERATED BY LARAVEL AUTO-DIALER" . PHP_EOL .
-                "; ==========================================" . PHP_EOL . PHP_EOL;
+            return null;
+        } catch (\Throwable $e) {
+            Log::error('Asterisk sinxronizatsiya xatosi: ' . $e->getMessage());
 
-            foreach ($activeTrunks as $trunk) {
-                $configContent .= $this->configService->generate($trunk) . PHP_EOL;
-            }
-
-            $filePath = '/etc/asterisk/pjsip_trunks.conf';
-
-            if (file_exists($filePath) && is_writable($filePath)) {
-                file_put_contents($filePath, $configContent);
-
-                //  YANGI TO'G'RI QATOR: K3s pod ichidan turib AMI orqali Asterisk-ni yangilash
-                app(\App\Services\AsteriskManagerService::class)->reloadPjsip();
-            } else {
-                Log::warning("Asterisk pjsip_trunks.conf fayli topilmadi yoki yozish huquqi yo'q.");
-            }
-        } catch (\Exception $e) {
-            Log::error("Asterisk konfiguratsiyasini sinxronizatsiya qilishda xatolik: " . $e->getMessage());
+            return $e->getMessage();
         }
     }
 }

@@ -59,6 +59,7 @@ return new class extends Migration
 
             $table->index('status');
             $table->index('target_type');
+            $table->unsignedInteger('retry_delay_minutes')->default(10);
         });
     }
 

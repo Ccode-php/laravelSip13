@@ -116,8 +116,8 @@ class SubscriberGroupController extends Controller
             ->where('name', $validated['name'])
             ->when(
                 $parentId === null,
-                fn ($query) => $query->whereNull('parent_id'),
-                fn ($query) => $query->where('parent_id', $parentId)
+                fn($query) => $query->whereNull('parent_id'),
+                fn($query) => $query->where('parent_id', $parentId)
             )
             ->exists();
 
@@ -249,8 +249,8 @@ class SubscriberGroupController extends Controller
             ->where('name', $name)
             ->when(
                 $parentId === null,
-                fn ($query) => $query->whereNull('parent_id'),
-                fn ($query) => $query->where('parent_id', $parentId)
+                fn($query) => $query->whereNull('parent_id'),
+                fn($query) => $query->where('parent_id', $parentId)
             )
             ->exists();
 
@@ -298,39 +298,12 @@ class SubscriberGroupController extends Controller
      */
     private function getDescendantIds($groupId): array
     {
-        $allGroups = SubscriberGroup::query()
-            ->select(['id', 'parent_id'])
-            ->get();
-
-        $childrenByParent = $allGroups->groupBy(
-            fn ($group) => (string) $group->parent_id
+        $ids = array_diff(
+            SubscriberGroup::withDescendantIds([(int) $groupId]),
+            [(int) $groupId]
         );
 
-        $descendantIds = [];
-        $visited = [(string) $groupId => true];
-        $stack = [(string) $groupId];
-
-        while (!empty($stack)) {
-            $currentId = array_pop($stack);
-
-            foreach (
-                $childrenByParent->get($currentId, collect())
-                as $child
-            ) {
-                $childId = (string) $child->id;
-
-                // Ma'lumotlar bazasida sikl bo'lsa ham to'xtaydi.
-                if (isset($visited[$childId])) {
-                    continue;
-                }
-
-                $visited[$childId] = true;
-                $descendantIds[] = $childId;
-                $stack[] = $childId;
-            }
-        }
-
-        return $descendantIds;
+        return array_map('strval', $ids);
     }
 
     /**

@@ -35,40 +35,10 @@ class SubscriberController extends Controller
         }
 
         if ($request->filled('group_id')) {
-            $selectedGroupId = (int) $request->input('group_id');
-
-            // Barcha kategoriyalarni bir marta olamiz.
-            $allGroups = SubscriberGroup::query()
-                ->get(['id', 'parent_id']);
-
-            // Tanlangan kategoriya ham natijaga kiradi.
-            $groupIds = [$selectedGroupId];
-            $knownIds = [$selectedGroupId => true];
-
-            // Har bir darajadagi ichki kategoriyalarni topamiz.
-            do {
-                $newIds = [];
-
-                foreach ($allGroups as $group) {
-                    $parentId = $group->parent_id;
-
-                    if (
-                        $parentId !== null &&
-                        isset($knownIds[(int) $parentId]) &&
-                        !isset($knownIds[(int) $group->id])
-                    ) {
-                        $id = (int) $group->id;
-
-                        $knownIds[$id] = true;
-                        $newIds[] = $id;
-                    }
-                }
-
-                $groupIds = array_merge($groupIds, $newIds);
-            } while (!empty($newIds));
-
-            // Tanlangan kategoriya va barcha ichki kategoriyalarning abonentlari.
-            $query->whereIn('subscriber_group_id', $groupIds);
+            $query->whereIn(
+                'subscriber_group_id',
+                SubscriberGroup::withDescendantIds([(int) $request->input('group_id')])
+            );
         }
 
         if ($request->has('enabled')) {
@@ -275,21 +245,7 @@ class SubscriberController extends Controller
                 $validated['enabled'] ?? true,
             ]);
 
-            $subscriber->phones()->delete();
-
-            foreach (
-                $validated['phones'] as $index => $phone
-            ) {
-                $subscriber->phones()->create([
-                    'phone' => trim($phone['phone']),
-                    'label' => $phone['label'] ?? null,
-                    'is_primary' =>
-                    $phone['is_primary']
-                        ?? ($index === 0),
-                    'enabled' =>
-                    $phone['enabled'] ?? true,
-                ]);
-            }
+            $this->syncPhones($subscriber, $validated['phones']);
         });
 
         $subscriber->load([
@@ -434,20 +390,10 @@ class SubscriberController extends Controller
                             'enabled' => true,
                         ]);
 
-                        $subscriber->phones()->delete();
-
-                        foreach ($phones as $phoneIndex => $phone) {
-                            $subscriber->phones()->create([
-                                'phone' => $phone,
-                                'label' =>
-                                $phoneIndex === 0
-                                    ? 'Asosiy'
-                                    : 'Qo‘shimcha',
-                                'is_primary' =>
-                                $phoneIndex === 0,
-                                'enabled' => true,
-                            ]);
-                        }
+                        $this->syncPhones(
+                            $subscriber,
+                            array_map(fn($p) => ['phone' => $p], $phones)
+                        );
 
                         $updated++;
                     } else {
@@ -458,18 +404,10 @@ class SubscriberController extends Controller
                             'enabled' => true,
                         ]);
 
-                        foreach ($phones as $phoneIndex => $phone) {
-                            $subscriber->phones()->create([
-                                'phone' => $phone,
-                                'label' =>
-                                $phoneIndex === 0
-                                    ? 'Asosiy'
-                                    : 'Qo‘shimcha',
-                                'is_primary' =>
-                                $phoneIndex === 0,
-                                'enabled' => true,
-                            ]);
-                        }
+                        $this->syncPhones(
+                            $subscriber,
+                            array_map(fn($p) => ['phone' => $p], $phones)
+                        );
 
                         $added++;
                     }
@@ -494,5 +432,25 @@ class SubscriberController extends Controller
                 ),
             ],
         ]);
+    }
+
+    private function syncPhones(Subscriber $subscriber, array $phones): void
+    {
+        $keep = [];
+
+        foreach ($phones as $i => $p) {
+            $model = $subscriber->phones()->updateOrCreate(
+                ['phone' => trim($p['phone'])],
+                [
+                    'label' => $p['label'] ?? ($i === 0 ? 'Asosiy' : 'Qo‘shimcha'),
+                    'is_primary' => $p['is_primary'] ?? ($i === 0),
+                    'enabled' => $p['enabled'] ?? true,
+                ]
+            );
+
+            $keep[] = $model->id;
+        }
+
+        $subscriber->phones()->whereNotIn('id', $keep)->delete();
     }
 }

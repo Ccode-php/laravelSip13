@@ -26,6 +26,9 @@ class CampaignRecipient extends Model
         'finished_at',
         'duration',
         'error_message',
+        'next_attempt_at',
+        'played',
+        'uniqueid',
     ];
 
     protected function casts(): array
@@ -37,6 +40,8 @@ class CampaignRecipient extends Model
             'answered_at' => 'datetime',
             'finished_at' => 'datetime',
             'duration' => 'integer',
+            'next_attempt_at' => 'datetime',
+            'played' => 'boolean',
         ];
     }
 

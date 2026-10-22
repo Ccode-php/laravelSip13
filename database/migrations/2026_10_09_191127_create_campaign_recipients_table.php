@@ -90,6 +90,17 @@ return new class extends Migration
             ]);
 
             $table->index('phone');
+
+            // Audio oxirigacha eshitildimi
+            $table->boolean('played')->default(false);
+
+            // Asterisk kanal ID si (nosozliklarni qidirish uchun)
+            $table->string('uniqueid', 64)->nullable();
+
+            // Qayta urinish qachondan boshlab mumkin
+            $table->timestamp('next_attempt_at')->nullable();
+
+            $table->index(['campaign_id', 'status', 'next_attempt_at'], 'recipients_pick_index');
         });
     }
 
