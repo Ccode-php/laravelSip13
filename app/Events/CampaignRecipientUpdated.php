@@ -47,6 +47,7 @@ class CampaignRecipientUpdated implements ShouldBroadcastNow
             'duration' => $r->duration,
             'sip_reason' => $r->sip_reason,
             'error_message' => $r->error_message,
+            'started_at' => $r->started_at?->toIso8601String(),
             'answered_at' => $r->answered_at?->toIso8601String(),
             'finished_at' => $r->finished_at?->toIso8601String(),
             'next_attempt_at' => $r->next_attempt_at?->toIso8601String(),
