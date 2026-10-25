@@ -190,7 +190,7 @@ class AsteriskManagerService
     ): string {
         $phone = preg_replace('/[\s()\-]/', '', $phone);
 
-        if (!is_string($phone) || !preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
+        if (!is_string($phone) || !preg_match('/^\+?[0-9]{3,15}$/', $phone)) {
             throw new InvalidArgumentException('Telefon raqami noto‘g‘ri.');
         }
 
