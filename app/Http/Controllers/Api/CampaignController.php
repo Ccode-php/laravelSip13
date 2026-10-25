@@ -159,16 +159,19 @@ class CampaignController extends Controller
             $subscribers = $subscriberQuery->orderBy('id')->get();
 
             $now = now();
+            $groupNames = SubscriberGroup::pluck('name', 'id');
             $rows = [];
 
             foreach ($subscribers as $subscriber) {
-                foreach ($subscriber->phones as $phone) {
+                foreach ($subscriber->phones->take(2)->values() as $phoneIndex => $phone) {
                     $rows[] = [
                         'campaign_id' => $campaign->id,
                         'subscriber_id' => $subscriber->id,
                         'subscriber_phone_id' => $phone->id,
                         'name' => $subscriber->name,
+                        'group_name' => $groupNames[$subscriber->subscriber_group_id] ?? null,
                         'phone' => $phone->phone,
+                        'phone_order' => $phoneIndex + 1,     // <-- YANGI: 1 yoki 2
                         'attempt' => 1,
                         'max_attempts' => $validated['max_attempts'],
                         'status' => 'pending',
@@ -250,17 +253,31 @@ class CampaignController extends Controller
         $request->validate([
             'status' => [
                 'nullable',
-                Rule::in(['pending', 'ringing', 'answered', 'busy', 'no_answer', 'failed']),
+                Rule::in(['pending', 'ringing', 'answered', 'busy', 'no_answer', 'failed', 'skipped']),
             ],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
         $query = $campaign->recipients()
             ->select([
-                'id', 'campaign_id', 'name', 'phone', 'attempt', 'max_attempts',
-                'status', 'sip_reason', 'error_message', 'started_at',
-                'answered_at', 'finished_at', 'next_attempt_at', 'duration',
-                'played', 'created_at',
+                'id',
+                'campaign_id',
+                'subscriber_id',
+                'name',
+                'group_name',
+                'phone',
+                'attempt',
+                'max_attempts',
+                'status',
+                'sip_reason',
+                'error_message',
+                'started_at',
+                'answered_at',
+                'finished_at',
+                'next_attempt_at',
+                'duration',
+                'played',
+                'created_at',
             ])
             ->orderBy('id');
 
@@ -400,6 +417,7 @@ class CampaignController extends Controller
             'busy' => 0,
             'no_answer' => 0,
             'failed' => 0,
+            'skipped' => 0,
         ];
 
         foreach ($rows as $row) {
@@ -423,7 +441,7 @@ class CampaignController extends Controller
             }
         }
 
-        $stats['finished'] = $stats['answered'] + $stats['busy'] + $stats['no_answer'] + $stats['failed'];
+        $stats['finished'] = $stats['answered'] + $stats['busy'] + $stats['no_answer'] + $stats['failed'] + $stats['skipped'];
         $stats['percent'] = $stats['total'] > 0
             ? (int) round($stats['finished'] / $stats['total'] * 100)
             : 0;

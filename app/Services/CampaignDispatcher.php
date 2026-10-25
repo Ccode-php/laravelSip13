@@ -132,6 +132,9 @@ class CampaignDispatcher
 
             $this->notify($recipient);
 
+            // Shu raqam ko'tardi: abonentning keyingi raqamiga qo'ng'iroq qilinmaydi
+            $this->skipLaterNumbers($recipient);
+
             return;
         }
 
@@ -183,8 +186,9 @@ class CampaignDispatcher
         ?string $sipReason = null
     ): void {
         if ($retry && $recipient->attempt < $recipient->max_attempts) {
+            // 0 = keyingi raund boshlanishi bilan darrov (kutish yo'q)
             $delay = (int) ($recipient->campaign?->retry_delay_minutes
-                ?: config('asterisk.dialer.retry_delay_minutes', 10));
+                ?? config('asterisk.dialer.retry_delay_minutes', 0));
 
             $recipient->update([
                 'status' => 'pending',
@@ -265,13 +269,37 @@ class CampaignDispatcher
     }
 
     /**
-     * Navbatdagi keyingi abonentni "ringing" qilib band qiladi.
+     * Qo'ng'iroq RAUNDLAR bilan ishlaydi:
+     *   1-raund: hamma abonentning 1-raqami (1-urinish)
+     *   2-raund: ko'tarmaganlarning 1-raqami (2-urinish) ... max_attempts gacha
+     *   keyin:   hali ko'tarmaganlarning 2-raqami (xuddi shu tartibda)
+     *
+     * raund = (raqam tartibi - 1) * max_attempts + urinish
+     * Keyingi raund oldingisi to'liq tugamaguncha (navbatda yoki jiringlayotgan
+     * qator qolmaguncha) boshlanmaydi.
+     */
+    private const ROUND_SQL = '((phone_order - 1) * max_attempts + attempt)';
+
+    /**
+     * Joriy raunddagi keyingi abonentni "ringing" qilib band qiladi.
      */
     private function claimNext(int $campaignId): ?CampaignRecipient
     {
         return DB::transaction(function () use ($campaignId) {
+            // Ochiq (hali tugamagan) qatorlar orasidagi eng kichik raund.
+            // Javob bergan (answered) qatorlar qayta urinmaydi, shuning uchun raundni to'smaydi.
+            $round = CampaignRecipient::where('campaign_id', $campaignId)
+                ->whereIn('status', ['pending', 'ringing'])
+                ->selectRaw('MIN(' . self::ROUND_SQL . ') AS r')
+                ->value('r');
+
+            if ($round === null) {
+                return null;
+            }
+
             $recipient = CampaignRecipient::where('campaign_id', $campaignId)
                 ->where('status', 'pending')
+                ->whereRaw(self::ROUND_SQL . ' = ?', [(int) $round])
                 ->where(function ($q) {
                     $q->whereNull('next_attempt_at')
                         ->orWhere('next_attempt_at', '<=', now());
@@ -295,6 +323,33 @@ class CampaignDispatcher
 
             return $recipient;
         });
+    }
+
+    /**
+     * Abonentning bir raqami ko'tarilsa, uning navbatdagi keyingi raqamlari
+     * o'tkazib yuboriladi (qayta qo'ng'iroq qilinmaydi).
+     */
+    private function skipLaterNumbers(CampaignRecipient $answered): void
+    {
+        if (!$answered->subscriber_id) {
+            return;
+        }
+
+        CampaignRecipient::where('campaign_id', $answered->campaign_id)
+            ->where('subscriber_id', $answered->subscriber_id)
+            ->where('phone_order', '>', $answered->phone_order)
+            ->where('status', 'pending')
+            ->get()
+            ->each(function (CampaignRecipient $other) use ($answered) {
+                $other->update([
+                    'status' => 'skipped',
+                    'finished_at' => now(),
+                    'next_attempt_at' => null,
+                    'error_message' => ($answered->phone_order . '-raqam javob berdi'),
+                ]);
+
+                $this->notify($other);
+            });
     }
 
     private function completeIfDone(Campaign $campaign): void

@@ -38,7 +38,9 @@ class CampaignRecipientUpdated implements ShouldBroadcastNow
         return [
             'id' => $r->id,
             'campaign_id' => $r->campaign_id,
+            'subscriber_id' => $r->subscriber_id,
             'name' => $r->name,
+            'group_name' => $r->group_name,
             'phone' => $r->phone,
             'status' => $r->status,
             'attempt' => $r->attempt,

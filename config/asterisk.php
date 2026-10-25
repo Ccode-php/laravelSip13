@@ -31,7 +31,7 @@ return [
         'originate_delay_ms' => 150,      // qo‘ng‘iroqlar orasidagi pauza (CPS ni cheklaydi)
         'tick_seconds' => 3,              // navbatni qanchalik tez-tez tekshirish
         'stuck_after_seconds' => 600,     // shundan keyin "qotib qolgan" qo‘ng‘iroq yopiladi
-        'retry_delay_minutes' => 10,      // qayta urinishgacha kutish
+        'retry_delay_minutes' => 0,      // qayta urinishgacha kutish
         'default_caller_id' => env('ASTERISK_DEFAULT_CALLER_ID', '1000'),
     ],
 ];

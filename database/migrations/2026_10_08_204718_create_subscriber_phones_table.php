@@ -15,21 +15,17 @@ return new class extends Migration
                 ->constrained('subscribers')
                 ->cascadeOnDelete();
 
-            $table->string('phone', 30);
+            $table->string('phone', 30)->unique();
 
-            $table->string('label', 50)
-                ->nullable();
+            $table->string('label', 50)->nullable();
 
-            $table->boolean('is_primary')
-                ->default(false);
+            $table->boolean('is_primary')->default(false);
 
-            $table->boolean('enabled')
-                ->default(true);
+            $table->boolean('enabled')->default(true);
 
             $table->timestamps();
 
             $table->index('subscriber_id');
-            $table->index('phone');
         });
     }
 

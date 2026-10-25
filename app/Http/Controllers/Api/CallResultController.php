@@ -20,7 +20,7 @@ class CallResultController extends Controller
             'campaign_id' => ['nullable', 'integer'],
             'status' => [
                 'nullable',
-                Rule::in(['pending', 'ringing', 'answered', 'busy', 'no_answer', 'failed']),
+                Rule::in(['pending', 'ringing', 'answered', 'busy', 'no_answer', 'failed', 'skipped']),
             ],
             'search' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:1000'],
@@ -29,7 +29,7 @@ class CallResultController extends Controller
         $query = CampaignRecipient::query()
             ->with('campaign:id,name')
             ->select([
-                'id', 'campaign_id', 'name', 'phone', 'attempt', 'max_attempts',
+                'id', 'campaign_id', 'subscriber_id', 'name','group_name', 'phone', 'attempt', 'max_attempts',
                 'status', 'sip_reason', 'error_message', 'started_at',
                 'answered_at', 'finished_at', 'duration', 'played', 'created_at',
             ])
@@ -48,7 +48,8 @@ class CallResultController extends Controller
 
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('phone', 'like', "%{$search}%");
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('group_name', 'like', "%{$search}%");
             });
         }
 

@@ -29,6 +29,8 @@ return new class extends Migration
              * Campaign yaratilgan vaqtdagi snapshot.
              */
             $table->string('name');
+            $table->string('group_name')->nullable();   // <-- YANGI: kategoriya nomi (snapshot)
+            $table->unsignedTinyInteger('phone_order')->default(1);   // 1 = asosiy raqam, 2 = qo'shimcha
             $table->string('phone');
 
             /*
@@ -54,6 +56,7 @@ return new class extends Migration
                 'busy',
                 'no_answer',
                 'failed',
+                'skipped',
             ])->default('pending');
 
             $table->string('sip_code')
