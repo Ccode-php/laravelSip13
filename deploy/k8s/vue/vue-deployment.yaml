@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vue-frontend
+  namespace: avtosip
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vue-frontend
+  template:
+    metadata:
+      labels:
+        app: vue-frontend
+    spec:
+      containers:
+        - name: vue
+          # GitHub Actions yaratgan eng oxirgi to'g'rilangan imejingiz
+          image: ghcr.io/ccode-php/vuesip:v1.0.9
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vue-service
+  namespace: avtosip
+spec:
+  type: ClusterIP # Klaster ichidagi ichki tarmoq rejimida qoladi
+  selector:
+    app: vue-frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80

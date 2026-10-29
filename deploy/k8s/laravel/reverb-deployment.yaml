@@ -1,0 +1,59 @@
+# WebSocket serveri (Laravel Reverb). Laravel image ning o'zi ishlatiladi,
+# faqat boshqa buyruq bilan ishga tushadi.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reverb
+  namespace: avtosip
+spec:
+  replicas: 1                # bitta nusxa yetadi (Redis kerak bo'lmaydi)
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: reverb
+  template:
+    metadata:
+      labels:
+        app: reverb
+    spec:
+      containers:
+        - name: reverb
+          image: ghcr.io/ccode-php/laravelsip13:v1.0.9   # laravel bilan bir xil tag
+          imagePullPolicy: IfNotPresent
+          command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+          envFrom:
+            - configMapRef:
+                name: laravel-config
+          env:
+            - name: APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: laravel-secret
+                  key: APP_KEY
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: laravel-secret
+                  key: DB_PASSWORD
+            - name: REVERB_APP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: laravel-secret
+                  key: REVERB_APP_SECRET
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reverb-service
+  namespace: avtosip
+spec:
+  type: ClusterIP
+  selector:
+    app: reverb
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

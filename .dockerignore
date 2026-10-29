@@ -3,4 +3,6 @@
 vendor
 node_modules
 storage/logs/*
+deploy
+README.md
 ```

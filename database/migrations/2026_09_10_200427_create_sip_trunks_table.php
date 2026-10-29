@@ -48,8 +48,6 @@ return new class extends Migration
             $table->boolean('enabled')->default(true);
         
             $table->timestamps();
-
-            $table->index('enabled');
         });
     }
 

@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: avtosip-ingress
+  namespace: avtosip
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.entrypoints: "web"
+spec:
+  rules:
+  - http:
+      paths:
+      # 1. API -> Laravel
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: laravel-service
+            port:
+              number: 8000
+      # 2. WebSocket (real-time) -> Reverb.
+      #    Reverb WebSocket ni /app da beradi. Traefik WebSocket Upgrade ni o'zi tushunadi.
+      #    Diqqat: /apps (Laravel dan Reverb ga ichki so'rovlar) tashqariga OCHILMAYDI.
+      - path: /app
+        pathType: Prefix
+        backend:
+          service:
+            name: reverb-service
+            port:
+              number: 8080
+      # 3. Qolgan hamma narsa -> Vue
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vue-service
+            port:
+              number: 80

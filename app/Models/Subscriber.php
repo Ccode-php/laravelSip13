@@ -14,7 +14,6 @@ class Subscriber extends Model
     protected $fillable = [
         'subscriber_group_id',
         'name',
-        'type',
         'enabled',
     ];
 

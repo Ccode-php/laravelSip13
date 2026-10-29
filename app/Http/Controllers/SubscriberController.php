@@ -137,7 +137,6 @@ class SubscriberController extends Controller
         $validated = $request->validate([
             'subscriber_group_id' => ['nullable', 'exists:subscriber_groups,id'],
             'name' => ['required', 'string', 'max:255'],
-            'type' => ['required', Rule::in(['student', 'employee'])],
             'enabled' => ['sometimes', 'boolean'],
             'phones' => ['required', 'array', 'min:1', 'max:2'],
             'phones.*.phone' => $this->phoneRules(),
@@ -150,7 +149,6 @@ class SubscriberController extends Controller
             $subscriber = Subscriber::create([
                 'subscriber_group_id' => $validated['subscriber_group_id'] ?? null,
                 'name' => $validated['name'],
-                'type' => $validated['type'],
                 'enabled' => $validated['enabled'] ?? true,
             ]);
 
@@ -188,7 +186,6 @@ class SubscriberController extends Controller
         $validated = $request->validate([
             'subscriber_group_id' => ['nullable', 'exists:subscriber_groups,id'],
             'name' => ['required', 'string', 'max:255'],
-            'type' => ['required', Rule::in(['student', 'employee'])],
             'enabled' => ['sometimes', 'boolean'],
             'phones' => ['required', 'array', 'min:1', 'max:2'],
             'phones.*.phone' => $this->phoneRules($subscriber),
@@ -201,7 +198,6 @@ class SubscriberController extends Controller
             $subscriber->update([
                 'subscriber_group_id' => $validated['subscriber_group_id'] ?? null,
                 'name' => $validated['name'],
-                'type' => $validated['type'],
                 'enabled' => $validated['enabled'] ?? true,
             ]);
 
@@ -235,7 +231,6 @@ class SubscriberController extends Controller
             'subscribers.*.name' => ['required', 'string', 'max:255'],
             'subscribers.*.phone' => ['required', 'string', 'max:100'],
             'subscribers.*.category' => ['required', 'string', 'max:255'],
-            'subscribers.*.type' => ['required', Rule::in(['student', 'employee'])],
         ]);
 
         $added = 0;
@@ -277,13 +272,12 @@ class SubscriberController extends Controller
 
                     $group = SubscriberGroup::firstOrCreate(
                         ['parent_id' => null, 'name' => trim($row['category'])],
-                        ['description' => null, 'enabled' => true]
+                        [ 'enabled' => true]
                     );
 
                     $subscriber = Subscriber::create([
                         'subscriber_group_id' => $group->id,
                         'name' => trim($row['name']),
-                        'type' => trim($row['type']),
                         'enabled' => true,
                     ]);
 

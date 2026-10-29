@@ -99,10 +99,7 @@ class SubscriberGroupController extends Controller
                 'string',
                 'max:255',
             ],
-            'description' => [
-                'nullable',
-                'string',
-            ],
+
             'enabled' => [
                 'sometimes',
                 'boolean',
@@ -131,7 +128,6 @@ class SubscriberGroupController extends Controller
         $group = SubscriberGroup::create([
             'parent_id' => $parentId,
             'name' => $validated['name'],
-            'description' => $validated['description'] ?? null,
             'enabled' => $validated['enabled'] ?? true,
         ]);
 
@@ -188,10 +184,7 @@ class SubscriberGroupController extends Controller
                 'string',
                 'max:255',
             ],
-            'description' => [
-                'nullable',
-                'string',
-            ],
+
             'enabled' => [
                 'sometimes',
                 'boolean',
@@ -265,10 +258,6 @@ class SubscriberGroupController extends Controller
             'parent_id' => $parentId,
             'name' => $name,
         ];
-
-        if (array_key_exists('description', $validated)) {
-            $changes['description'] = $validated['description'];
-        }
 
         if (array_key_exists('enabled', $validated)) {
             $changes['enabled'] = $validated['enabled'];

@@ -15,7 +15,6 @@ class SubscriberGroup extends Model
     protected $fillable = [
         'parent_id',
         'name',
-        'description',
         'enabled',
     ];
 

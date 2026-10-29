@@ -10,26 +10,16 @@ return new class extends Migration
     {
         Schema::create('subscribers', function (Blueprint $table) {
             $table->id();
-
+        
             $table->foreignId('subscriber_group_id')
                 ->nullable()
                 ->constrained('subscriber_groups')
                 ->nullOnDelete();
-
+        
             $table->string('name');
-
-            $table->enum('type', [
-                'student',
-                'employee',
-            ])->default('student');
-
-            $table->boolean('enabled')
-                ->default(true);
-
+            $table->boolean('enabled')->default(true);
+        
             $table->timestamps();
-
-            $table->index('subscriber_group_id');
-            $table->index('enabled');
         });
     }
 

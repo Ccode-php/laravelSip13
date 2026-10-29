@@ -13,27 +13,18 @@ return new class extends Migration
     {
         Schema::create('subscriber_groups', function (Blueprint $table) {
             $table->id();
-
+        
             $table->foreignId('parent_id')
                 ->nullable()
                 ->constrained('subscriber_groups')
                 ->nullOnDelete();
-
+        
             $table->string('name');
-
-            $table->text('description')->nullable();
-
             $table->boolean('enabled')->default(true);
-
+        
             $table->timestamps();
-
-            $table->index('parent_id');
-            $table->index('enabled');
-
-            $table->unique([
-                'parent_id',
-                'name',
-            ]);
+        
+            $table->unique(['parent_id', 'name']);
         });
     }
 

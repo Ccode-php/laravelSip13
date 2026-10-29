@@ -10,22 +10,17 @@ return new class extends Migration
     {
         Schema::create('subscriber_phones', function (Blueprint $table) {
             $table->id();
-
+        
             $table->foreignId('subscriber_id')
                 ->constrained('subscribers')
                 ->cascadeOnDelete();
-
+        
             $table->string('phone', 30)->unique();
-
             $table->string('label', 50)->nullable();
-
             $table->boolean('is_primary')->default(false);
-
             $table->boolean('enabled')->default(true);
-
+        
             $table->timestamps();
-
-            $table->index('subscriber_id');
         });
     }
 
