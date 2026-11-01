@@ -390,7 +390,33 @@ class CampaignDispatcher
      */
     public function handleHangup(int $recipientId, int $attempt, int $cause, string $text): void
     {
+        // 1) OriginateResponse hali kelmagan bo'lsa: keyin o'qish uchun saqlaymiz
         Cache::put("hangup:{$recipientId}:{$attempt}", ['cause' => $cause, 'text' => $text], 120);
+
+        if ($cause <= 0) {
+            return;
+        }
+
+        // 2) OriginateResponse oldin kelib, urinish yakunlangan bo'lsa: izohni to'ldiramiz
+        $recipient = CampaignRecipient::find($recipientId);
+
+        if (
+            $recipient
+            && $recipient->attempt === $attempt
+            && $recipient->finished_at !== null
+            && in_array($recipient->status, ['busy', 'no_answer', 'failed'], true)
+            && !str_contains((string) $recipient->sip_reason, 'cause')
+        ) {
+            Cache::forget("hangup:{$recipientId}:{$attempt}");
+
+            $recipient->update([
+                'status' => $this->mapCause($cause),
+                'error_message' => $this->causeText($cause),
+                'sip_reason' => "cause {$cause} ({$text}) / " . $recipient->sip_reason,
+            ]);
+
+            $this->notify($recipient);
+        }
     }
 
     private function mapCause(int $cause): string
