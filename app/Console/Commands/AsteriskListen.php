@@ -20,7 +20,7 @@ class AsteriskListen extends Command
         $ami = new AsteriskManagerService();
         $dispatcher = new CampaignDispatcher($ami);
 
-        $ami->onEvent(fn (array $event) => $this->routeEvent($dispatcher, $event));
+        $ami->onEvent(fn(array $event) => $this->routeEvent($dispatcher, $event));
 
         $tickEvery = (int) config('asterisk.dialer.tick_seconds', 3);
         $lastTick = 0;
@@ -64,6 +64,21 @@ class AsteriskListen extends Command
     {
         try {
             $name = $event['Event'] ?? '';
+
+            // Qo'ng'iroq kanali yopildi: sabab kodi (Q.850)
+            if (
+                $name === 'Hangup'
+                && preg_match('/^rcpt-(\d+)-(\d+)$/', $event['Uniqueid'] ?? '', $m)
+            ) {
+                $dispatcher->handleHangup(
+                    (int) $m[1],
+                    (int) $m[2],
+                    (int) ($event['Cause'] ?? 0),
+                    (string) ($event['Cause-txt'] ?? '')
+                );
+
+                return;
+            }
 
             // Qo‘ng‘iroqqa javob berildi / berilmadi
             if (

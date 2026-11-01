@@ -8,6 +8,7 @@ use App\Models\CampaignRecipient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
@@ -37,7 +38,7 @@ class CampaignDispatcher
 
         Campaign::where('status', 'running')
             ->pluck('id')
-            ->each(fn (int $id) => $this->dispatch($id));
+            ->each(fn(int $id) => $this->dispatch($id));
     }
 
     /**
@@ -134,6 +135,20 @@ class CampaignDispatcher
 
             // Shu raqam ko'tardi: abonentning keyingi raqamiga qo'ng'iroq qilinmaydi
             $this->skipLaterNumbers($recipient);
+
+            return;
+        }
+
+        $hangup = Cache::pull("hangup:{$recipientId}:{$attempt}");
+        $cause = (int) ($hangup['cause'] ?? 0);
+
+        if ($hangup && $cause > 0) {
+            $this->registerFailure(
+                $recipient,
+                $this->mapCause($cause),
+                $this->causeText($cause),
+                sipReason: "cause {$cause} ({$hangup['text']}) / AMI reason {$reason}"
+            );
 
             return;
         }
@@ -366,6 +381,45 @@ class CampaignDispatcher
         if (!$open) {
             $campaign->update(['status' => 'completed', 'finished_at' => now()]);
         }
+    }
+
+
+    /**
+     * Hangup hodisasi: sabab kodini vaqtincha saqlaydi.
+     * OriginateResponse kelganda handleOriginateResponse() uni o'qiydi.
+     */
+    public function handleHangup(int $recipientId, int $attempt, int $cause, string $text): void
+    {
+        Cache::put("hangup:{$recipientId}:{$attempt}", ['cause' => $cause, 'text' => $text], 120);
+    }
+
+    private function mapCause(int $cause): string
+    {
+        return match ($cause) {
+            17 => 'busy',
+            16, 18, 19 => 'no_answer',
+            default => 'failed',
+        };
+    }
+
+    private function causeText(int $cause): string
+    {
+        return match ($cause) {
+            1 => 'Raqam mavjud emas',
+            3 => 'Yo‘nalish topilmadi',
+            16 => 'Qo‘ng‘iroq javobsiz tugadi',
+            17 => 'Abonent band (gaplashyapti)',
+            18 => 'Abonent javob bermadi',
+            19 => 'Abonent ko‘tarmadi',
+            20 => 'Abonent o‘chiq yoki tarmoqda yo‘q',
+            21 => 'Abonent rad etdi',
+            22 => 'Raqam o‘zgargan',
+            27 => 'Abonent qurilmasi ishlamayapti',
+            28 => 'Raqam formati noto‘g‘ri',
+            34, 42 => 'Liniya band (operator)',
+            38, 41 => 'Tarmoq xatosi',
+            default => "Sabab kodi: {$cause}",
+        };
     }
 
     /**

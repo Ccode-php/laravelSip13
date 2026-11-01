@@ -204,6 +204,7 @@ class AsteriskManagerService
 
         $this->action([
             'Action' => 'Originate',
+            'ChannelId' => $actionId,   // <-- yangi: Hangup hodisasida Uniqueid shu bo'ladi
             'ActionID' => $actionId,
             'Channel' => "PJSIP/{$phone}@{$endpoint}",
             'Context' => config('asterisk.dialer.context'),
